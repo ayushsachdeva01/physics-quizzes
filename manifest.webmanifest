@@ -1,0 +1,23 @@
+{
+  "name": "Physora",
+  "short_name": "Physora",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f1e8",
+  "theme_color": "#f4f1e8",
+  "icons": [
+    {
+      "src": "assets/physora-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/physora-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "description": "Focused physics recall practice by Ayush Sachdeva."
+}

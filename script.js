@@ -1,0 +1,1783 @@
+/*
+  Physora
+  Study-pack-first build
+  Chapterwise quizzes are intentionally disabled and preserved in:
+  disabled/chapterwise-quiz.js.disabled.txt
+*/
+
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+const STORAGE_KEY = 'physicsRecallStudyPackV1';
+const LEGACY_STORAGE_KEY = 'physicsRecallStudyPackV0';
+const DAILY_GOAL = 100;
+const DAILY_MISSION_BASE = 10;
+const DAILY_MISSION_MAX = 40;
+const DAILY_MISSION_STREAK_CAP = 15;
+const DAILY_MISSION_BONUS_BASE = 50;
+const DAILY_MISSION_BONUS_MAX = 125;
+
+function missionConfigForStreak(streak){
+  const s=Math.min(DAILY_MISSION_STREAK_CAP,Math.max(0,Number(streak)||0));
+  return {
+    questions:Math.min(DAILY_MISSION_MAX, DAILY_MISSION_BASE + s*2),
+    bonus:Math.min(DAILY_MISSION_BONUS_MAX, DAILY_MISSION_BONUS_BASE + s*5)
+  };
+}
+
+function missionStreak(grade){
+  const dates=state.activity?.[grade]||[];
+  const last=dates[dates.length-1];
+  return last===yesterday()?Number(state.streak?.[grade]||0):0;
+}
+
+const AMINO_ACIDS = [
+  ['Glycine','Gly','G'],['Alanine','Ala','A'],['Valine','Val','V'],['Leucine','Leu','L'],['Isoleucine','Ile','I'],
+  ['Arginine','Arg','R'],['Lysine','Lys','K'],['Glutamic acid','Glu','E'],['Aspartic acid','Asp','D'],['Glutamine','Gln','Q'],
+  ['Asparagine','Asn','N'],['Threonine','Thr','T'],['Serine','Ser','S'],['Cysteine','Cys','C'],['Methionine','Met','M'],
+  ['Phenylalanine','Phe','F'],['Tyrosine','Tyr','Y'],['Tryptophan','Trp','W'],['Histidine','His','H'],['Proline','Pro','P']
+];
+
+const VITAMINS = [
+  {vitamin:'Vitamin A',name:'Retinol',sources:'Fish liver oil, carrots, butter and milk',deficiency:'Xerophthalmia and night blindness'},
+  {vitamin:'Vitamin B₁',name:'Thiamine',sources:'Yeast, milk, green vegetables and cereals',deficiency:'Beri-beri'},
+  {vitamin:'Vitamin B₂',name:'Riboflavin',sources:'Milk, egg white, liver and kidney',deficiency:'Cheilosis and digestive disorders'},
+  {vitamin:'Vitamin B₆',name:'Pyridoxine',sources:'Yeast, milk, egg yolk, cereals and grams',deficiency:'Convulsions'},
+  {vitamin:'Vitamin B₁₂',name:'Cobalamin',sources:'Meat, fish, egg and curd',deficiency:'Pernicious anaemia'},
+  {vitamin:'Vitamin C',name:'Ascorbic acid',sources:'Citrus fruits, amla and green leafy vegetables',deficiency:'Scurvy'},
+  {vitamin:'Vitamin D',name:'Calciferol',sources:'Sunlight, fish and egg yolk',deficiency:'Rickets and osteomalacia'},
+  {vitamin:'Vitamin E',name:'Tocopherols',sources:'Vegetable oils such as wheat germ and sunflower oil',deficiency:'Increased RBC fragility and muscular weakness'},
+  {vitamin:'Vitamin K',name:null,sources:'Green leafy vegetables',deficiency:'Increased blood clotting time'},
+  {vitamin:'Vitamin H',name:'Biotin',sources:'Yeast, avocados and nuts',deficiency:'Skin disease and hair loss'}
+];
+
+const LEVEL_TITLES = [
+  [1,'Physics Starter'],[3,'Mechanics Apprentice'],[6,'Concept Builder'],[10,'Formula Hunter'],[15,'Problem Solver'],[21,'Physics Solver'],[30,'Field Tactician'],[40,'Formula Architect'],[55,'Physics Ace'],[75,'JEE Strategist'],[100,'Master of Physics'],[150,'Physics Legend'],[1000,'Physics Legend · MAX']
+];
+
+const defaultState = {
+  version: 4,
+  grade: null,
+  xp: 0,
+  streak: {XI:0, XII:0},
+  bestStreak: {XI:0, XII:0},
+  activity: {XI:[], XII:[]},
+  dayStamp: {XI:null, XII:null},
+  todayXp: 0,
+  daily: {
+    XI:{date:null,answered:0,correct:0,complete:false},
+    XII:{date:null,answered:0,correct:0,complete:false}
+  },
+  answered: {XI:0, XII:0},
+  correct: {XI:0, XII:0},
+  cards: {XI:{}, XII:{}},
+  packStarts: {XI:0, XII:0},
+  sessions: {XI:0, XII:0},
+  perfectSessions: {XI:0, XII:0},
+  bestCombo: {XI:0, XII:0},
+  goalDays: 0,
+  goalDates: [],
+  achievements: {XI:[], XII:[]},
+  achievementLevels: {XI:{}, XII:{}},
+  globalAchievementLevels: {xp:0},
+  recent: {XI:[], XII:[]},
+  lastSession: {XI:null, XII:null},
+  customQuizzes: {XI:[], XII:[]}
+};
+
+function clone(value){ return JSON.parse(JSON.stringify(value)); }
+
+function mergeState(base, saved){
+  const out = clone(base);
+  if(!saved || typeof saved !== 'object') return out;
+  for(const key of Object.keys(base)){
+    if(saved[key] === undefined) continue;
+    if(base[key] && typeof base[key] === 'object' && !Array.isArray(base[key]) && saved[key] && typeof saved[key] === 'object' && !Array.isArray(saved[key])){
+      out[key] = mergeState(base[key], saved[key]);
+    }else{
+      out[key] = saved[key];
+    }
+  }
+  return out;
+}
+
+function normalizeState(saved){
+  const out=mergeState(defaultState,saved);
+  // v3 stored XP separately by class. Preserve all earned XP when moving to the global system.
+  if(saved && typeof saved.xp==='object' && saved.xp!==null){
+    out.xp=Number(saved.xp.XI||0)+Number(saved.xp.XII||0);
+  }else out.xp=Number(out.xp||0);
+  if(saved && typeof saved.todayXp==='object' && saved.todayXp!==null){
+    out.todayXp=Number(saved.todayXp.XI||0)+Number(saved.todayXp.XII||0);
+  }else out.todayXp=Number(out.todayXp||0);
+  if(saved && typeof saved.goalDays==='object' && saved.goalDays!==null){
+    out.goalDays=Math.max(Number(saved.goalDays.XI||0),Number(saved.goalDays.XII||0));
+  }else out.goalDays=Number(out.goalDays||0);
+  if(saved && typeof saved.goalDates==='object' && !Array.isArray(saved.goalDates) && saved.goalDates!==null){
+    out.goalDates=[...new Set([...(saved.goalDates.XI||[]),...(saved.goalDates.XII||[])])].sort();
+  }else if(!Array.isArray(out.goalDates)) out.goalDates=[];
+  if(!out.globalAchievementLevels || typeof out.globalAchievementLevels!=='object') out.globalAchievementLevels={xp:0};
+  out.globalAchievementLevels.xp=Math.max(Number(out.globalAchievementLevels.xp||0), Number(out.achievementLevels?.XI?.xp||0), Number(out.achievementLevels?.XII?.xp||0));
+  if(!out.customQuizzes || typeof out.customQuizzes!=='object') out.customQuizzes={XI:[],XII:[]};
+  out.customQuizzes.XI=Array.isArray(out.customQuizzes.XI)?out.customQuizzes.XI:[];
+  out.customQuizzes.XII=Array.isArray(out.customQuizzes.XII)?out.customQuizzes.XII:[];
+  return out;
+}
+
+function loadState(){
+  try{
+    const current=JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');
+    if(current) return normalizeState(current);
+    const legacy=JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY)||'null');
+    return normalizeState(legacy);
+  }catch{return normalizeState(null);}
+}
+
+let state = loadState();
+let activeGrade = state.grade;
+let packCatalog = [];
+let formulaCatalog = [];
+let formulaFiltered = [];
+let formulaReady = false;
+let currentPack = null;
+let selectedLength = 20;
+let formulaSessionLength = 20;
+let achievementFilter = 'all';
+
+let session = {
+  type:null,
+  name:'STUDY PACK',
+  items:[],
+  index:0,
+  score:0,
+  xp:0,
+  answered:false,
+  combo:0,
+  maxCombo:0,
+  newCards:0,
+  lastAnswer:null,
+  endless:false,
+  pack:null,
+  currentItem:null,
+  questionStarted:0
+};
+
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+function dateKey(date = new Date()){
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+}
+function offsetDateKey(days){
+  const d = new Date();
+  d.setDate(d.getDate()+days);
+  return dateKey(d);
+}
+function today(){ return dateKey(); }
+function yesterday(){ return offsetDateKey(-1); }
+
+function ensureDay(grade){
+  const t = today();
+  if(state.dayStamp[grade] !== t){
+    state.dayStamp[grade] = t;
+    state.todayXp = 0;
+  }
+  if(state.daily[grade].date !== t){
+    const cfg=missionConfigForStreak(missionStreak(grade));
+    state.daily[grade] = {date:t,answered:0,correct:0,complete:false,target:cfg.questions,bonus:cfg.bonus};
+  }else{
+    if(!Number.isFinite(Number(state.daily[grade].target))) state.daily[grade].target=DAILY_MISSION_BASE;
+    if(!Number.isFinite(Number(state.daily[grade].bonus))) state.daily[grade].bonus=DAILY_MISSION_BONUS_BASE;
+  }
+  save();
+}
+
+const MAX_LEVEL = 1000;
+
+function levelThreshold(level){
+  if(level <= 1) return 0;
+  const target = Math.min(level, MAX_LEVEL);
+  let total = 0;
+  // Leveling starts deliberately slower than before and scales steadily.
+  // The cost rises roughly linearly with level, making Level 1000 a
+  // long-term achievement without making the final levels unreachable.
+  for(let current=2; current<=target; current++){
+    const cost = Math.round(120 + (3 * current));
+    total += cost;
+  }
+  return total;
+}
+
+function levelInfo(xp){
+  const safeXp = Math.max(0, Number(xp) || 0);
+  let level=1;
+  while(level < MAX_LEVEL && levelThreshold(level+1) <= safeXp){ level++; }
+
+  const start=levelThreshold(level);
+  const isMax=level >= MAX_LEVEL;
+  const next=isMax ? start : levelThreshold(level+1);
+  return {
+    level, start, next, isMax,
+    into:Math.max(0,safeXp-start),
+    needed:isMax ? 0 : Math.max(0,next-safeXp),
+    span:Math.max(1,next-start),
+    pct:isMax ? 100 : Math.min(100,Math.max(0,((safeXp-start)/(next-start))*100))
+  };
+}
+function levelTitle(level){
+  let title = LEVEL_TITLES[0][1];
+  for(const [min,name] of LEVEL_TITLES){
+    if(level >= min) title = name;
+  }
+  return title;
+}
+
+function formatNumber(n){ return Number(n || 0).toLocaleString('en-IN'); }
+function escapeHtml(value){
+  return String(value ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+}
+function escapeAttr(value){ return String(value ?? '').replace(/[^a-zA-Z0-9_-]/g,''); }
+function shuffle(list){
+  const copy = [...list];
+  for(let i=copy.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [copy[i],copy[j]]=[copy[j],copy[i]];
+  }
+  return copy;
+}
+
+const ACHIEVEMENT_FAMILIES = [
+  {
+    key:'questions', icon:'quiz', label:'Question Grinder', description:'Answer questions and keep sharpening your recall.', unit:'questions',
+    milestones:[1,5,10,25,50,100,250,500,1000,2500,5000,10000,25000,50000,100000],
+    value:g=>state.answered[g],
+  },
+  {
+    key:'xp', icon:'bolt', label:'XP Climber', description:'Keep earning XP and push your total higher.', unit:'XP',
+    milestones:[100,250,500,1000,2500,5000,10000,25000,50000,100000,250000,500000,1000000],
+    value:()=>getTotalXP(),
+    infinite:true,
+  },
+  {
+    key:'streak', icon:'local_fire_department', label:'Streak Keeper', description:'Come back consistently and keep the streak alive.', unit:'days',
+    milestones:[1,3,7,14,30,60,100,180,365,500,730,1000,2500],
+    value:g=>state.streak[g],
+    infinite:true,
+  },
+  {
+    key:'unique', icon:'explore', label:'Explorer', description:'Discover more distinct cards across your study packs.', unit:'cards',
+    milestones:[1,5,10,25,50,100,250,500,1000,2500,5000,10000],
+    value:g=>Object.values(state.cards[g]||{}).filter(v=>v.seen>0).length,
+    infinite:true,
+  },
+  {
+    key:'perfect', icon:'workspace_premium', label:'Perfect Sessions', description:'Finish flawless sessions and raise your record.', unit:'perfect sessions',
+    milestones:[1,3,5,10,25,50,100,250,500,1000],
+    value:g=>state.perfectSessions[g],
+    infinite:true,
+  },
+  {
+    key:'sessions', icon:'school', label:'Session Maker', description:'Complete study sessions and keep the habit growing.', unit:'sessions',
+    milestones:[1,3,5,10,25,50,100,250,500,1000,2500],
+    value:g=>state.sessions[g],
+    infinite:true,
+  },
+  {
+    key:'combo', icon:'local_fire_department', label:'Combo Chaser', description:'Build longer runs of correct answers.', unit:'correct answers',
+    milestones:[3,5,10,15,20,30,50,75,100],
+    value:g=>state.bestCombo[g],
+    infinite:true,
+  },
+  {
+    key:'goaldays', icon:'calendar_month', label:'Daily Finisher', description:'Complete daily goals and make your study days count.', unit:'goals',
+    milestones:[1,3,7,14,30,60,100,180,365,730],
+    value:()=>state.goalDays,
+    infinite:true,
+  },
+  {
+    key:'packstarts', icon:'inventory_2', label:'Pack Collector', description:'Return to study packs and keep learning.', unit:'pack sessions',
+    milestones:[1,3,5,10,25,50,100,250,500],
+    value:g=>state.packStarts[g],
+    infinite:true,
+  }
+];
+
+function progressiveMilestones(family, value){
+  const milestones=[...(family.milestones||[])];
+  const target=Math.max(0,value);
+  let last=milestones[milestones.length-1]||1;
+  const growth = family.key==='streak' ? 1.65 : family.key==='combo' ? 1.6 : 2;
+  while(family.infinite && last <= target){
+    const next=Math.max(last+1, Math.ceil(last*growth));
+    milestones.push(next);
+    last=next;
+    if(milestones.length>80) break;
+  }
+  return milestones;
+}
+
+function achievementProgress(grade,family){
+  const value=Math.max(0,Number(family.value(grade)||0));
+  const milestones=progressiveMilestones(family,value);
+  let level=0;
+  for(const threshold of milestones){
+    if(value>=threshold) level++; else break;
+  }
+  let previous=level>0?milestones[level-1]:0;
+  let next=milestones[level];
+  if(next===undefined){
+    next=Math.max(previous+1,Math.ceil(previous*(family.key==='streak'?1.65:2)));
+  }
+  const span=Math.max(1,next-previous);
+  const pct=Math.min(100,Math.max(0,((value-previous)/span)*100));
+  return {family,value,milestones,level,previous,next,pct};
+}
+
+function achievementDefs(grade){
+  return ACHIEVEMENT_FAMILIES.map(family=>({
+    ...achievementProgress(grade,family),
+    id:family.key,
+    icon:family.icon,
+    title:family.label,
+    description:family.description, unit:family.unit
+  }));
+}
+
+function migrateAchievementLevels(grade){
+  if(!state.achievementLevels) state.achievementLevels={XI:{},XII:{}};
+  if(!state.achievementLevels[grade]) state.achievementLevels[grade]={};
+  const legacy=Array.isArray(state.achievements?.[grade]) ? state.achievements[grade] : [];
+  if(!legacy.length) return;
+  for(const family of ACHIEVEMENT_FAMILIES){
+    const ids=legacy.filter(id=>String(id).startsWith(`${family.key}_`));
+    if(!ids.length) continue;
+    let maxLevel=state.achievementLevels[grade][family.key]||0;
+    for(const id of ids){
+      const threshold=Number(String(id).split('_').pop());
+      if(!Number.isFinite(threshold)) continue;
+      const expanded=progressiveMilestones(family,Math.max(threshold,Number(family.value(grade)||0)));
+      const idx=expanded.findIndex(v=>v===threshold);
+      if(idx>=0) maxLevel=Math.max(maxLevel,idx+1);
+    }
+    state.achievementLevels[grade][family.key]=maxLevel;
+  }
+}
+
+function checkAchievements(grade){
+  migrateAchievementLevels(grade);
+  const levels=state.achievementLevels[grade];
+  const defs=achievementDefs(grade);
+  const newly=[];
+  for(const def of defs){
+    const levelsStore=def.family.key==='xp' ? state.globalAchievementLevels : levels;
+    const previousLevel=Number(levelsStore[def.family.key]||0);
+    if(def.level>previousLevel){
+      levelsStore[def.family.key]=def.level;
+      for(let level=previousLevel+1; level<=def.level; level++){
+        const threshold=def.milestones[level-1] ?? def.next;
+        newly.push({...def,level,threshold,levelDescription:`Level ${level}`});
+      }
+    }
+  }
+  if(newly.length){
+    // Achievement XP is intentionally modest so the badge system rewards progress
+    // without creating a runaway self-reward loop.
+    const bonus=Math.min(120,newly.reduce((sum,item)=>sum + Math.min(24,7+Math.floor(item.level/3)),0));
+    addXP(grade,bonus);
+    const high=newly[newly.length-1];
+    const label=newly.length===1
+      ? `${high.title} · Level ${high.level} unlocked · +${bonus} XP`
+      : `${newly.length} achievement levels reached · +${bonus} XP`;
+    toast(label);
+    celebrate();
+    setTimeout(()=>{renderAchievementsPreview(grade); if(!$('#achievementModal').hidden)renderAchievementsModal();},50);
+  }
+  save();
+  return newly.length;
+}
+
+function ensureDaySilent(grade){
+  const t=today();
+  if(state.dayStamp[grade]!==t){
+    state.dayStamp[grade]=t;
+    state.todayXp=0;
+  }
+  if(state.daily[grade].date!==t){
+    const cfg=missionConfigForStreak(missionStreak(grade));
+    state.daily[grade]={date:t,answered:0,correct:0,complete:false,target:cfg.questions,bonus:cfg.bonus};
+  }else{
+    // Backfill the new mission fields for saves created before streak-scaled missions.
+    if(!Number.isFinite(Number(state.daily[grade].target))){
+      state.daily[grade].target=DAILY_MISSION_BASE;
+    }
+    if(!Number.isFinite(Number(state.daily[grade].bonus))){
+      state.daily[grade].bonus=DAILY_MISSION_BONUS_BASE;
+    }
+  }
+}
+
+function getTotalXP(){ return Number(state.xp||0); }
+
+function addXP(grade, amount){
+  ensureDaySilent(grade);
+  const gain=Math.max(0,Number(amount)||0);
+  state.xp += gain;
+  state.todayXp += gain;
+  if(state.todayXp >= DAILY_GOAL && !state.goalDates.includes(today())){
+    state.goalDates.push(today());
+    state.goalDays += 1;
+    toast('Daily goal complete · 100 XP earned today.');
+    celebrate();
+  }
+  save();
+}
+
+function recordActivity(grade){
+  ensureDaySilent(grade);
+  const t = today();
+  const dates = state.activity[grade];
+  if(!dates.includes(t)){
+    const last = dates[dates.length-1];
+    state.streak[grade] = last === yesterday() ? state.streak[grade] + 1 : 1;
+    dates.push(t);
+    if(dates.length > 730) state.activity[grade] = dates.slice(-730);
+    state.bestStreak[grade] = Math.max(state.bestStreak[grade], state.streak[grade]);
+  }
+  save();
+}
+
+function getCardStat(grade, key){
+  return state.cards[grade][key] || {seen:0,correct:0,wrong:0,lastSeen:0};
+}
+
+function touchCard(grade, key, correct){
+  const previous = getCardStat(grade,key);
+  const firstExposure = previous.seen === 0;
+  const next = {
+    seen:previous.seen + 1,
+    correct:previous.correct + (correct?1:0),
+    wrong:previous.wrong + (correct?0:1),
+    lastSeen:Date.now(),
+    status:previous.status || 'new'
+  };
+  state.cards[grade][key] = next;
+  state.answered[grade] += 1;
+  if(correct) state.correct[grade] += 1;
+  return firstExposure;
+}
+
+function cardPriority(grade, item){
+  const key = item.cardKey;
+  const stat = getCardStat(grade,key);
+  const missRate = stat.seen ? (stat.wrong/stat.seen) : 1;
+  const mastery = stat.seen ? (stat.correct/stat.seen) : 0;
+  const unseen = stat.seen === 0 ? 100000 : 0;
+  const weakness = stat.wrong * 1800 + missRate * 1000 + (1-mastery)*600;
+  const freshness = stat.lastSeen ? Math.max(0, 180000 - (Date.now()-stat.lastSeen))/1000 : 0;
+  return unseen + weakness + freshness + Math.random()*500;
+}
+
+function selectPackCard(grade, cards, recentIds=[]){
+  if(!cards.length) return null;
+  const notRecent = cards.filter(c=>!recentIds.includes(c.cardKey));
+  const candidates = notRecent.length ? notRecent : cards;
+  return candidates.slice().sort((a,b)=>cardPriority(grade,b)-cardPriority(grade,a))[0];
+}
+
+function buildAdaptivePackSet(grade, cards, count){
+  const chosen = [];
+  const remaining = [...cards];
+  while(chosen.length < count && cards.length){
+    const pool = remaining.length ? remaining : [...cards];
+    const candidate = selectPackCard(grade,pool,chosen.slice(-2).map(x=>x.cardKey));
+    if(!candidate) break;
+    chosen.push(candidate);
+    const idx = remaining.findIndex(x=>x.cardKey===candidate.cardKey);
+    if(idx>=0) remaining.splice(idx,1);
+  }
+  return chosen;
+}
+
+
+function makeQuizPrompt(){
+  const chapter=$('#customChapter').value.trim(),count=Math.max(1,Math.min(100,Number($('#customCount').value)||20)),difficulty=$('#customDifficulty').value,details=$('#customDetails').value.trim();
+  if(!chapter){toast('Enter the chapter or topic first.');$('#customChapter').focus();return;}
+  const grade=activeGrade||'XI',dCode={'Easy 1':'E1','Easy 2':'E2','Medium 1':'M1','Medium 2':'M2','Hard 1':'H1','Hard 2':'H2'}[difficulty]||'M2';
+  const prompt=[
+    `Create exactly ${count} ${grade} Physics questions on ${chapter}. Difficulty: ${dCode}.`,
+    `H2 is the ABSOLUTE MAXIMUM difficulty. E1=basic recall, E2=easy application, M1=standard JEE, M2=tricky multi-step JEE, H1=very hard JEE, H2=hardest JEE Advanced-level difficulty. NEVER exceed H2. Do not generate Olympiad, undergraduate or research-level questions unless explicitly requested.`,
+    `Use the most appropriate JEE types: subjective/recall, single-correct MCQ, multiple-correct MSQ, numerical/integer, matrix match, assertion-reason, or another genuine JEE-style type when appropriate.`,
+    `For physics structures use [[smiles:SMILES]] when useful. This is the ONLY special notation. Do not use CCF or any other renderer format.`,
+    `Return ONLY CRQ1 data. No Markdown, code fences, commentary or blank lines. The prompt may be detailed, but the RESPONSE must be extremely compact: minified JSON arrays, one Q per line.`,
+    `Header: CRQ1|{"t":"title","c":"chapter","d":"${dCode}","n":${count}}`,
+    `Compact forms: Qs["question","answer","brief explanation"]; Qm["question",["A","B","C","D"],2,"brief explanation"]; Qms["question",["A","B","C","D"],[0,2],"brief explanation"]; Qn["question",42,"brief explanation"]; Qmx["question",["List I A","List I B"],["List II i","List II ii","List II iii"],[[0],[1,2]],"brief explanation"]; Qar["Assertion... Reason...",["A","B","C","D"],0,"brief explanation"].`,
+    `Qs=answer; Qm=k is zero-based correct option; Qms=k contains all correct indices; Qn=v is exact numerical answer and optional 4th value is tolerance; Qmx uses List I, List II and k rows of correct List II indices; Qar=k is correct standard Assertion-Reason option.`,
+    `Every question MUST include a short useful explanation, preferably one sentence. Matrix Match must be a true two-list JEE match; a row may have multiple correct matches. [[smiles:...]] may appear in either list.`,
+    `Quality: scientifically accurate, self-contained, unambiguous, non-duplicated, JEE-relevant and calibrated exactly to ${dCode}.`,
+    details?`Extra requirements: ${details}`:''
+  ].filter(Boolean).join('\n');
+  $('#customPrompt').value=prompt;$('#customPromptPanel').hidden=false;$('#customCreatePanel').hidden=true;$('#customResponse').focus();
+}
+
+async function copyCustomPrompt(){
+  const value=$('#customPrompt').value;
+  try{await navigator.clipboard.writeText(value); toast('Prompt copied to clipboard.');}
+  catch{ $('#customPrompt').focus(); $('#customPrompt').select(); toast('Prompt selected — copy it manually.'); }
+}
+
+function parseCRQ1(raw){
+  let text=String(raw||'').trim().replace(/^```(?:json|text)?\s*/i,'').replace(/\s*```$/,'').trim();
+  const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(!lines[0]?.startsWith('CRQ1'))throw new Error('Missing CRQ1 header.');
+  const headerText=lines[0].slice(4).replace(/^\|/,'').trim();let meta={};if(headerText){try{meta=JSON.parse(headerText)}catch{throw new Error('Invalid CRQ1 header JSON.')}}
+  const questions=[],validTypes=new Set(['s','m','ms','n','mx','ar']),aliases={subjective:'s',short:'s',recall:'s',mcq:'m',single:'m',single_correct:'m',msq:'ms',multiple:'ms',multiple_correct:'ms',numerical:'n',numeric:'n',integer:'n',matrix:'mx',matrix_match:'mx','matrix-match':'mx',assertion_reason:'ar','assertion-reason':'ar'};
+  for(const line of lines.slice(1)){
+    if(!line.startsWith('Q'))continue;let q,type;const compact=line.match(/^Q(s|m|ms|n|mx|ar)(\[.*\])$/);
+    try{if(compact){type=compact[1];const a=JSON.parse(compact[2]);if(!Array.isArray(a))throw 0;q={q:a[0]};if(type==='s'){q.a=a[1];q.e=a[2]}else if(type==='m'||type==='ar'){q.o=a[1];q.k=a[2];q.e=a[3]}else if(type==='ms'){q.o=a[1];q.k=a[2];q.e=a[3]}else if(type==='n'){q.v=a[1];q.e=a[2];if(a[3]!==undefined)q.tol=a[3]}else if(type==='mx'){q.r=a[1];q.c=a[2];q.k=a[3];q.e=a[4]}}else{let body=line.slice(1).trim();if(body.startsWith('|'))body=body.slice(1).trim();q=JSON.parse(body);type=aliases[String(q.t||q.type||((Array.isArray(q.o))?'m':'s')).toLowerCase()]||String(q.t||q.type||'s').toLowerCase();}}catch{throw new Error(`Invalid question line near: ${line.slice(0,120)}`)}
+    if(!validTypes.has(type))throw new Error(`Unsupported question type: ${type}`);if(!q.q)throw new Error('Every question needs q.');const item={t:type,q:String(q.q),e:String(q.e??q.explanation??((type==='n'||type==='m'||type==='ms'||type==='mx'||type==='ar')?q.a:'')??'').trim()};
+    if(type==='s'){item.a=String(q.a??'').trim();if(!item.a)throw new Error('Subjective questions need an answer.');}
+    else if(type==='n'){const value=Number(q.v??q.value??(typeof q.a==='number'?q.a:NaN));if(!Number.isFinite(value))throw new Error('Every numerical question needs a numeric answer.');item.v=value;if(q.tol!==undefined){const tol=Number(q.tol);if(!Number.isFinite(tol)||tol<0)throw new Error('Invalid numerical tolerance.');item.tol=tol;}}
+    else if(type==='mx'){q.r=q.r||q.rows;q.c=q.c||q.cols;q.k=q.k||q.key;if(!Array.isArray(q.r)||!q.r.length||!Array.isArray(q.c)||!q.c.length||!Array.isArray(q.k)||q.k.length!==q.r.length)throw new Error('Matrix Match needs List I, List II and one answer array per List I row.');item.r=q.r.map(String);item.c=q.c.map(String);item.k=q.k.map(row=>Array.isArray(row)?[...new Set(row.map(Number).filter(Number.isInteger))]:[]);item.k.forEach(row=>row.forEach(i=>{if(i<0||i>=item.c.length)throw new Error('Matrix Match contains an invalid List II index.');}));}
+    else{if(!Array.isArray(q.o)||q.o.length<2)throw new Error(`${type==='ar'?'Assertion-Reason':'MCQ'} questions need options.`);item.o=q.o.map(String);item.k=type==='ms'?[...new Set((Array.isArray(q.k)?q.k:[]).map(Number).filter(Number.isInteger))]:Number(q.k);if(type==='ms'){if(!item.k.length)throw new Error('MSQ needs at least one correct option.');item.k.forEach(i=>{if(i<0||i>=item.o.length)throw new Error('MSQ contains an invalid option index.');});}else if(!Number.isInteger(item.k)||item.k<0||item.k>=item.o.length)throw new Error('Invalid correct option index.');}
+    questions.push(item);
+  }
+  if(!questions.length)throw new Error('No questions found.');return {meta,questions};
+}
+
+function saveCustomQuizFromResponse(){
+  const raw=$('#customResponse').value.trim();
+  if(!raw){toast('Paste the AI response first.'); return;}
+  try{
+    const parsed=parseCRQ1(raw);
+    const quiz={id:`cq_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,...parsed,grade:activeGrade,created:Date.now()};
+    state.customQuizzes[activeGrade].unshift(quiz);
+    state.customQuizzes[activeGrade]=state.customQuizzes[activeGrade].slice(0,50);
+    save();
+    closeModal('customQuizModal');
+    $('#customResponse').value='';
+    $('#customPrompt').value='';
+    $('#customPromptPanel').hidden=true;
+    $('#customCreatePanel').hidden=false;
+    renderCustomQuizzes();
+    toast(`${quiz.questions.length} questions saved.`);
+  }catch(error){ toast(error.message||'Could not parse that response.'); }
+}
+
+function openCustomQuizModal(){
+  $('#customQuizModal').hidden=false;
+  $('#customCreatePanel').hidden=false;
+  $('#customPromptPanel').hidden=true;
+  $('#customChapter').focus();
+}
+function playCustomQuiz(id){
+  const quiz=(state.customQuizzes[activeGrade]||[]).find(q=>q.id===id);
+  if(!quiz) return;
+  const items=shuffle(quiz.questions).map((q,i)=>({
+    ...q, id:`${quiz.id}:${i}`, cardKey:`custom:${quiz.id}:${i}`, kind:'custom'
+  }));
+  session={type:'custom',name:quiz.title,items,index:0,score:0,xp:0,answered:false,combo:0,maxCombo:0,newCards:0,lastAnswer:null,endless:false,pack:{id:quiz.id,name:quiz.title,description:quiz.chapter,cards:items},currentItem:null,questionStarted:0,specialKind:'custom'};
+  setScreen(quizScreen); $('#quizName').textContent=quiz.title; $('#quizFinishBtn').textContent='End quiz'; renderQuiz(); window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function deleteCustomQuiz(id){
+  const quiz=(state.customQuizzes[activeGrade]||[]).find(q=>q.id===id);
+  if(!quiz) return;
+  if(!window.confirm(`Delete “${quiz.title}”?`)) return;
+  state.customQuizzes[activeGrade]=state.customQuizzes[activeGrade].filter(q=>q.id!==id);
+  save(); renderCustomQuizzes();
+}
+
+function customDifficultyLabel(value){ return ({E1:'Easy 1',E2:'Easy 2',M1:'Medium 1',M2:'Medium 2',H1:'Hard 1',H2:'Hard 2'})[value]||value||'Custom'; }
+
+function renderCustomQuizzes(){
+  const list=$('#customQuizList');
+  const quizzes=state.customQuizzes[activeGrade]||[];
+  if(!quizzes.length){
+    list.innerHTML=`<div class="custom-empty"><span class="material-symbols-rounded">auto_awesome</span><div><strong>Create your first quiz</strong><p>Tell an AI what you want to practise, paste its compact quiz response here, and keep the quiz in Physora.</p></div><button id="customEmptyCreate" class="secondary-cta" type="button">Create a quiz</button></div>`;
+    $('#customEmptyCreate').onclick=openCustomQuizModal; return;
+  }
+  list.innerHTML=quizzes.map(q=>`<article class="custom-quiz-card"><div class="custom-quiz-icon"><span class="material-symbols-rounded">auto_awesome</span></div><div class="custom-quiz-copy"><span>${escapeHtml(q.chapter||'Custom')} · ${escapeHtml(customDifficultyLabel(q.difficulty))}</span><h3>${escapeHtml(q.title)}</h3><p>${q.questions.length} questions</p></div><button class="custom-play" data-custom-play="${escapeAttr(q.id)}" type="button"><span class="material-symbols-rounded">play_arrow</span> Practice</button><button class="custom-delete" data-custom-delete="${escapeAttr(q.id)}" type="button" aria-label="Delete quiz"><span class="material-symbols-rounded">delete</span></button></article>`).join('');
+  $$('[data-custom-play]').forEach(b=>b.onclick=()=>playCustomQuiz(b.dataset.customPlay));
+  $$('[data-custom-delete]').forEach(b=>b.onclick=()=>deleteCustomQuiz(b.dataset.customDelete));
+}
+
+
+async function loadFormulaCatalog(){
+  try{
+    const response=await fetch('data/physics_formulas.json',{cache:'no-store'});
+    if(!response.ok) throw new Error('formula data');
+    const data=await response.json();
+    formulaCatalog=Array.isArray(data.chapters)?data.chapters:[];
+    formulaReady=true;
+  }catch(err){
+    formulaCatalog=[]; formulaReady=false;
+    toast('Physics formula library could not be loaded.');
+  }
+  populateFormulaChapterFilter();
+  renderFormulaLibrary();
+}
+
+function formulaGradeMatches(chapter,grade){
+  return grade==='ALL' || chapter.grade===grade || chapter.grade==='XI-XII';
+}
+function formulaAllItems(){
+  return formulaCatalog.flatMap(ch=>ch.formulas.map(f=>({...f,chapterId:ch.id,chapterName:ch.name,grade:ch.grade,chapterNumber:ch.number})));
+}
+function populateFormulaChapterFilter(){
+  const select=$('#formulaChapterFilter'); if(!select)return;
+  const grade=$('#formulaGradeFilter')?.value||'ALL';
+  const current=select.value||'ALL';
+  const chapters=formulaCatalog.filter(c=>formulaGradeMatches(c,grade));
+  select.innerHTML='<option value="ALL">All chapters</option>'+chapters.map(c=>`<option value="${escapeAttr(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+  select.value=chapters.some(c=>c.id===current)?current:'ALL';
+}
+function formulaSearchScore(item,q){
+  if(!q)return 0;
+  const hay=`${item.name} ${item.formula} ${item.notes} ${item.topic} ${item.chapterName}`.toLowerCase();
+  if(hay===q)return 100; if(item.name.toLowerCase().includes(q))return 80; if(item.chapterName.toLowerCase().includes(q))return 60; if(item.formula.toLowerCase().includes(q))return 50; return hay.includes(q)?20:0;
+}
+function formulaStatus(grade,key){
+  return state.cards[grade]?.[key]?.status || 'new';
+}
+function setFormulaStatus(grade,key,status){
+  if(!state.cards[grade]) state.cards[grade]={};
+  const current=getCardStat(grade,key);
+  state.cards[grade][key]={...current,status,lastSeen:current.lastSeen||0};
+  save();
+}
+function formulaStatusLabel(status){
+  return status==='remembered'?'Remembered':status==='forgotten'?'Forgotten':status==='review'?'Needs another look':status==='unimportant'?'Unimportant':'New';
+}
+function formulaRenderTex(tex){
+  // The source JSON stores formulas in the conventional $...$ form.
+  // MathJax is configured for \( ... \), so strip the source delimiters first.
+  const raw=String(tex??'').trim();
+  if(raw.startsWith('$$') && raw.endsWith('$$')) return `\\[${raw.slice(2,-2)}\\]`;
+  if(raw.startsWith('$') && raw.endsWith('$')) return `\\(${raw.slice(1,-1)}\\)`;
+  return `\\(${raw}\\)`;
+}
+function renderFormulaLibrary(){
+  const host=$('#formulaList'); if(!host)return;
+  const grade=$('#formulaGradeFilter')?.value||activeGrade||'ALL';
+  const chapter=$('#formulaChapterFilter')?.value||'ALL';
+  const q=($('#formulaSearch')?.value||'').trim().toLowerCase();
+  const all=formulaAllItems();
+  const filtered=all.filter(item=>formulaGradeMatches(item,grade) && (chapter==='ALL'||item.chapterId===chapter) && (!q||formulaSearchScore(item,q)>0));
+  const sorted=q?[...filtered].sort((a,b)=>formulaSearchScore(b,q)-formulaSearchScore(a,q)):filtered;
+  const groups=new Map();
+  sorted.forEach(item=>{if(!groups.has(item.chapterId))groups.set(item.chapterId,{chapterName:item.chapterName,grade:item.grade,number:item.chapterNumber,items:[]});groups.get(item.chapterId).items.push(item);});
+  $('#packCount').textContent=`${sorted.length} formula${sorted.length===1?'':'s'}`;
+  if(!formulaReady){host.innerHTML='<div class="formula-empty">Loading formula library…</div>';return;}
+  if(!sorted.length){host.innerHTML='<div class="formula-empty"><span class="material-symbols-rounded">search_off</span><div><strong>No formulas found.</strong><p>Try another chapter or search term.</p></div></div>';return;}
+  host.innerHTML=[...groups.values()].map(g=>`<section class="formula-chapter" data-formula-chapter="${escapeAttr(g.number)}"><div class="formula-chapter-head"><div><span class="formula-chapter-number">${String(g.number).padStart(2,'0')}</span><div><span class="eyebrow">CLASS ${escapeHtml(g.grade)}</span><h3>${escapeHtml(g.chapterName)}</h3></div></div><span>${g.items.length} formulas</span></div><div class="formula-grid">${g.items.map(item=>{
+    const status=formulaStatus(activeGrade||item.grade,item.id);
+    const important=status!=='unimportant';
+    return `<article class="formula-card status-${status}"><div class="formula-card-top"><span class="formula-topic">${escapeHtml(item.topic||'Core')}</span><span class="formula-status-pill">${formulaStatusLabel(status)}</span></div><h4>${escapeHtml(item.name)}</h4><div class="formula-display" data-formula-render="${escapeAttr(item.id)}">${escapeHtml(formulaRenderTex(item.formula))}</div>${item.notes?`<p>${escapeHtml(item.notes)}</p>`:''}<div class="formula-status-actions single"><button class="status-btn importance-btn ${important?'important':'unimportant'}" data-toggle-important="${escapeAttr(item.id)}" type="button"><span class="material-symbols-rounded">${important?'bookmark':'bookmark_add'}</span>${important?'Mark unimportant':'Mark important'}</button></div></article>`;
+  }).join('')}</div></section>`).join('');
+  if(window.MathJax?.typesetPromise) window.MathJax.typesetPromise([host]);
+  $$('[data-toggle-important]').forEach(btn=>btn.onclick=()=>{
+    const id=btn.dataset.toggleImportant;
+    const current=formulaStatus(activeGrade,id);
+    setFormulaStatus(activeGrade,id,current==='unimportant'?'new':'unimportant');
+    renderFormulaLibrary(); renderHomeMemory();
+  });
+}
+
+function renderHomeMemory(){
+  if(!activeGrade)return;
+  const items=formulaAllItems().filter(x=>x.grade===activeGrade||x.grade==='XI-XII');
+  const counts={remembered:0,forgotten:0,unimportant:0,new:0};
+  items.forEach(item=>counts[formulaStatus(activeGrade,item.id)]++);
+  const set=(id,v)=>{const el=$(`#${id}`);if(el)el.textContent=formatNumber(v)};
+  set('statRemembered',counts.remembered);set('statForgotten',counts.forgotten);set('statUnimportant',counts.unimportant);set('statAvailable',items.length-counts.unimportant);
+}
+
+function openFormulaLibrary(){
+  if($('#formulaGradeFilter'))$('#formulaGradeFilter').value=activeGrade||'ALL';
+  populateFormulaChapterFilter();
+  renderFormulaLibrary();
+  setScreen($('#libraryScreen'));
+  updateTopbar();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function openFormulaSession(){
+  if(!activeGrade){toast('Choose a class first.');return;}
+  const choices=$('#formulaChapterChoices');
+  const chapters=formulaCatalog.filter(c=>formulaGradeMatches(c,activeGrade));
+  choices.innerHTML=chapters.map(c=>`<label class="chapter-choice"><input type="checkbox" value="${escapeAttr(c.id)}"><span><b>${String(c.number).padStart(2,'0')}</b><span>${escapeHtml(c.name)}</span></span></label>`).join('');
+  formulaSessionLength=20;
+  $$('[data-formula-length]').forEach(btn=>btn.classList.toggle('active',btn.dataset.formulaLength==='20'));
+  $('#formulaSessionModal').hidden=false;
+}
+
+function startConfiguredFormulaSession(){
+  const selected=[...document.querySelectorAll('#formulaChapterChoices input:checked')].map(x=>x.value);
+  if(!selected.length){toast('Select at least one chapter.');return;}
+  let items=formulaAllItems().filter(x=>(x.grade===activeGrade||x.grade==='XI-XII') && selected.includes(x.chapterId) && formulaStatus(activeGrade,x.id)!=='unimportant');
+  if(!items.length){toast('All selected formulas are marked unimportant.');return;}
+  const forgotten=items.filter(x=>formulaStatus(activeGrade,x.id)==='forgotten');
+  const review=items.filter(x=>formulaStatus(activeGrade,x.id)==='review');
+  const fresh=items.filter(x=>formulaStatus(activeGrade,x.id)==='new');
+  const remembered=items.filter(x=>formulaStatus(activeGrade,x.id)==='remembered');
+  items=[...shuffle(forgotten),...shuffle(review),...shuffle(fresh),...shuffle(remembered)];
+  items=items.slice(0,Math.min(formulaSessionLength,items.length)).map(x=>({...x,id:`formula:${x.id}`,cardKey:`formula:${x.id}`,kind:'formula'}));
+  $('#formulaSessionModal').hidden=true;
+  session={type:'formula',name:`Formula Revision · Class ${activeGrade}`,items,index:0,score:0,xp:0,answered:false,combo:0,maxCombo:0,newCards:0,lastAnswer:null,endless:false,pack:{id:'formula-recall',name:'Formula Revision',description:'Physics formula active recall',cards:items},currentItem:null,questionStarted:0,specialKind:'formula'};
+  setScreen(quizScreen);$('#quizName').textContent='Formula Revision';$('#quizFinishBtn').textContent='End session';renderQuiz();window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function startFormulaRecall(){openFormulaSession();}
+function renderFormulaQuestion(item,total){
+  const baseId=item.cardKey.replace(/^formula:/,'');
+  const displayFormula=formulaRenderTex(item.formula);
+  questionArea.innerHTML=`<article class="question-wrap"><div class="question-top"><span class="question-label">${escapeHtml(item.chapterName||'PHYSICS')} · FORMULA</span><span class="question-count">${total} questions</span></div><h2>${escapeHtml(item.name)}</h2><div class="formula-recall-prompt">Recall the formula before revealing it.</div><button id="revealFormula" class="primary-cta" type="button"><span class="material-symbols-rounded">visibility</span> Reveal formula</button><div id="formulaAnswer"></div></article>`;
+  $('#revealFormula').onclick=()=>{session.answered=true;$('#revealFormula').disabled=true;$('#formulaAnswer').innerHTML=`<div class="formula-reveal"><div class="formula-display formula-display-large">${escapeHtml(displayFormula)}</div>${item.notes?`<p>${escapeHtml(item.notes)}</p>`:''}</div><div class="subtle-note">Grade your recall honestly.</div><div class="self-grade formula-grade-actions three"><button id="formulaKnow" class="grade-answer good" type="button">I knew it</button><button id="formulaReview" class="grade-answer neutral" type="button">I need another look</button><button id="formulaMiss" class="grade-answer retry" type="button">I forgot</button></div>`;if(window.MathJax?.typesetPromise)window.MathJax.typesetPromise([$('#formulaAnswer')]);$('#formulaKnow').onclick=()=>{setFormulaStatus(activeGrade,baseId,'remembered');gradeSessionItem(item,true,getCardStat(activeGrade,item.cardKey).seen);finishOrNext()};$('#formulaReview').onclick=()=>{setFormulaStatus(activeGrade,baseId,'review');gradeSessionItem(item,false,getCardStat(activeGrade,item.cardKey).seen);finishOrNext()};$('#formulaMiss').onclick=()=>{setFormulaStatus(activeGrade,baseId,'forgotten');gradeSessionItem(item,false,getCardStat(activeGrade,item.cardKey).seen);finishOrNext()};};
+}
+
+function findFormula(id){return formulaAllItems().find(x=>x.id===id)}
+async function copyFormula(id){const item=findFormula(id);if(!item)return;try{await navigator.clipboard.writeText(item.formula);toast('Formula copied.')}catch{toast('Formula: '+item.formula)}}
+function startFormulaRecall(){
+  const grade=$('#formulaGradeFilter')?.value||activeGrade||'ALL';
+  let items=formulaAllItems().filter(x=>grade==='ALL'||x.grade===grade||x.grade==='XI-XII');
+  if(!items.length){toast('No formulas available for this class.');return;}
+  items=shuffle(items).slice(0,Math.min(30,items.length)).map(x=>({...x,id:`formula:${x.id}`,cardKey:`formula:${x.id}`,kind:'formula'}));
+  session={type:'formula',name:`Formula Recall · Class ${grade}`,items,index:0,score:0,xp:0,answered:false,combo:0,maxCombo:0,newCards:0,lastAnswer:null,endless:false,pack:{id:'formula-recall',name:'Formula Recall',description:'Physics formula active recall',cards:items},currentItem:null,questionStarted:0,specialKind:'formula'};
+  setScreen(quizScreen);$('#quizName').textContent='Formula Recall';$('#quizFinishBtn').textContent='End session';renderQuiz();window.scrollTo({top:0,behavior:'smooth'});
+}
+function renderFormulaQuestion(item,total){
+  questionArea.innerHTML=`<article class="question-wrap"><div class="question-top"><span class="question-label">${escapeHtml(item.chapterName||'PHYSICS')} · FORMULA</span><span class="question-count">${total} questions</span></div><h2>${escapeHtml(item.name)}</h2><div class="formula-recall-prompt">Recall the formula before revealing it.</div><button id="revealFormula" class="primary-cta" type="button"><span class="material-symbols-rounded">visibility</span> Reveal formula</button><div id="formulaAnswer"></div></article>`;
+  $('#revealFormula').onclick=()=>{session.answered=true;$('#revealFormula').disabled=true;$('#formulaAnswer').innerHTML=`<div class="formula-reveal"><div class="formula-display formula-display-large">${escapeHtml(item.formula)}</div>${item.notes?`<p>${escapeHtml(item.notes)}</p>`:''}</div><div class="subtle-note">Grade your own recall honestly.</div><div class="self-grade"><button id="formulaKnow" class="grade-answer good" type="button">I knew it</button><button id="formulaMiss" class="grade-answer retry" type="button">I missed it</button></div>`;if(window.MathJax?.typesetPromise)window.MathJax.typesetPromise([$('#formulaAnswer')]);$('#formulaKnow').onclick=()=>{gradeSessionItem(item,true,getCardStat(activeGrade,item.cardKey).seen);finishOrNext()};$('#formulaMiss').onclick=()=>{gradeSessionItem(item,false,getCardStat(activeGrade,item.cardKey).seen);finishOrNext()};};
+}
+
+function chapterDisabledComment(){
+  /*
+    CHAPTERWISE QUIZZES ARE INTENTIONALLY DISABLED.
+    The complete previous chapter engine + question bank is preserved in:
+    disabled/chapterwise-quiz.js.disabled.txt
+  */
+}
+
+const gradeScreen = $('#gradeScreen');
+const dashboardScreen = $('#dashboardScreen');
+const libraryScreen = $('#libraryScreen');
+const quizScreen = $('#quizScreen');
+const completeScreen = $('#completeScreen');
+const packList = $('#packList');
+const questionArea = $('#questionArea');
+
+function setScreen(screen){
+  [gradeScreen,dashboardScreen,libraryScreen,quizScreen,completeScreen].forEach(node => node.hidden = node !== screen);
+}
+
+function toast(message){
+  const node = $('#toast');
+  node.textContent = message;
+  node.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => node.classList.remove('show'), 2200);
+}
+
+function celebrate(){
+  const layer = $('#confettiLayer');
+  if(!layer) return;
+  layer.innerHTML='';
+  for(let i=0;i<28;i++){
+    const piece=document.createElement('span');
+    piece.className='confetti';
+    piece.style.left=`${Math.random()*100}%`;
+    piece.style.setProperty('--dx',`${(Math.random()*2-1)*180}px`);
+    piece.style.setProperty('--rot',`${(Math.random()*2-1)*700}deg`);
+    piece.style.animationDelay=`${Math.random()*180}ms`;
+    layer.appendChild(piece);
+  }
+  setTimeout(()=>layer.innerHTML='',1500);
+}
+
+function renderGradePicker(){
+  $$('.grade-row').forEach(button=>{
+    const grade=button.dataset.grade;
+    const hasActivity=getTotalXP()>0 || state.answered[grade]>0 || state.activity[grade]?.length;
+    button.classList.toggle('active',!!hasActivity);
+    button.querySelector('.grade-status').textContent=hasActivity?`Level ${levelInfo(getTotalXP()).level}`:'Begin';
+  });
+}
+
+function updateTopbar(){
+  const has=!!activeGrade;
+  $('#breadcrumb').hidden=!has;
+  $('#xpChip').hidden=!has;
+  $('#streakChip').hidden=!has;
+  $('#classChip').hidden=!has;
+  if(!has){
+    $('#brandContext').textContent='By Ayush Sachdeva';
+    return;
+  }
+  ensureDaySilent(activeGrade);
+  $('#brandContext').textContent=`Ayush Sachdeva · Class ${activeGrade} Physics`;
+  $('#breadcrumb').textContent=`CLASS ${activeGrade} · PHYSICS`;
+  $('#xpChipValue').textContent=formatNumber(getTotalXP());
+  $('#streakChipValue').textContent=state.streak[activeGrade];
+  $('#classChipValue').textContent=activeGrade;
+}
+
+function enterGrade(grade){
+  activeGrade=grade;
+  state.grade=grade;
+  ensureDaySilent(grade);
+  save();
+  renderDashboard();
+  setScreen(dashboardScreen);
+  updateTopbar();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function home(){
+  activeGrade=null;
+  state.grade=null;
+  save();
+  setScreen(gradeScreen);
+  renderGradePicker();
+  updateTopbar();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+async function loadPackCatalog(){
+  try{
+    const response=await fetch('packs/packs_config.json',{cache:'no-store'});
+    if(!response.ok) throw new Error('config');
+    const cfg=await response.json();
+    packCatalog=(cfg.packs||[]).filter(pack=>(pack.grade||'XII')===activeGrade);
+  }catch{
+    packCatalog=[];
+  }
+  renderDaily();
+}
+
+async function getPackCards(pack){
+  const response=await fetch(pack.path,{cache:'no-store'});
+  if(!response.ok) throw new Error('pack');
+  const raw=await response.json();
+  return raw
+    .filter(card=>{
+      const hasVersions=Array.isArray(card.versions) && card.versions.length>0;
+      const hasQuestion=typeof card.question==='string' || (card.question && typeof card.question==='object');
+      return (hasVersions || hasQuestion) && card.answer!=null;
+    })
+    .map((card,index)=>{
+      const versions=Array.isArray(card.versions)?card.versions:[];
+      const question=card.question!=null
+        ? card.question
+        : versions[Math.floor(Math.random()*versions.length)];
+      return {
+        id:`${pack.id}:${index}`,
+        cardKey:`pack:${pack.id}:${index}`,
+        packId:pack.id,
+        group:card.group||pack.name,
+        question,
+        answer:card.answer
+      };
+    });
+}
+
+function packProgress(packId, total){
+  const keys=Object.keys(state.cards[activeGrade]||{}).filter(key=>key.startsWith(`pack:${packId}:`));
+  const seen=keys.filter(key=>getCardStat(activeGrade,key).seen>0).length;
+  const stats=keys.map(key=>getCardStat(activeGrade,key));
+  const answered=stats.reduce((sum,x)=>sum+x.seen,0);
+  const correct=stats.reduce((sum,x)=>sum+x.correct,0);
+  const accuracy=answered?Math.round(correct/answered*100):0;
+  return {seen,total,answered,accuracy};
+}
+
+function packIcon(pack){
+  const icons=['inventory_2','science','auto_awesome','menu_book','hub','bolt'];
+  const index=Math.abs(String(pack.id).split('').reduce((a,c)=>a+c.charCodeAt(0),0))%icons.length;
+  return icons[index];
+}
+
+async function renderPackLibrary(){
+  if(!packList) return;
+  $('#packCount').textContent=`${packCatalog.length} pack${packCatalog.length===1?'':'s'}`;
+  if(!packCatalog.length){
+    packList.innerHTML=`
+      <div class="pack-empty">
+        <span class="pack-empty-icon"><span class="material-symbols-rounded">add_to_photos</span></span>
+        <div>
+          <h3>Your study-pack library is ready.</h3>
+          <p>No packs have been added to Class ${activeGrade} yet. Add a pack to <strong>packs/packs_config.json</strong> and its JSON file; it will appear here automatically.</p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const cards = await Promise.all(packCatalog.map(async pack=>{
+    try{
+      const loaded=await getPackCards(pack);
+      return {pack,total:loaded.length};
+    }catch{
+      return {pack,total:0};
+    }
+  }));
+
+  const groups = new Map();
+  cards.forEach(entry=>{
+    const group=entry.pack.group||'Other Physics';
+    if(!groups.has(group)) groups.set(group,[]);
+    groups.get(group).push(entry);
+  });
+
+  packList.innerHTML=[...groups.entries()].map(([group,entries])=>`
+    <section class="pack-group">
+      <div class="pack-group-head">
+        <span class="pack-group-rule"></span>
+        <span class="pack-group-name">${escapeHtml(group)}</span>
+        <span class="pack-group-count">${entries.length} pack${entries.length===1?'':'s'}</span>
+      </div>
+      <div class="pack-grid">
+        ${entries.map(({pack,total})=>{
+          const progress=packProgress(pack.id,total);
+          const pct=total?Math.min(100,Math.round(progress.seen/total*100)):0;
+          return `
+            <article class="pack-card">
+              <div>
+                <div class="pack-card-top">
+                  <span class="pack-card-icon"><span class="material-symbols-rounded">${escapeHtml(packIcon(pack))}</span></span>
+                  <span class="pack-badge">${escapeHtml((pack.category||'PHYSICS').toUpperCase())}</span>
+                </div>
+                <h3>${escapeHtml(pack.name)}</h3>
+                <p>${escapeHtml(pack.description||'A focused set of physics recall questions.')}</p>
+              </div>
+              <div class="pack-meta">
+                <div class="pack-meta-copy">
+                  <strong>${formatNumber(progress.seen)}</strong> / ${formatNumber(total)} seen
+                  <div class="pack-progress"><i style="width:${pct}%"></i></div>
+                </div>
+                <button class="pack-study-btn" data-pack-open="${escapeAttr(pack.id)}" type="button">Start pack <span class="material-symbols-rounded">arrow_forward</span></button>
+              </div>
+            </article>`;
+        }).join('')}
+      </div>
+    </section>`).join('');
+
+  $$('[data-pack-open]').forEach(btn=>btn.onclick=()=>openPackLauncher(btn.dataset.packOpen));
+}
+
+function openPackLauncher(packId){
+  const pack=packCatalog.find(p=>p.id===packId);
+  if(!pack) return;
+  currentPack=pack;
+  selectedLength=20;
+  $('#packModalTitle').textContent=pack.name;
+  $('#packModalDescription').textContent=pack.description||'A focused set of physics recall questions.';
+  $('#customLength').value=20;
+  $$('.length-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.length==='20'));
+  $('#startPackBtn').innerHTML='<span class="material-symbols-rounded">play_arrow</span><span>Start 20 questions</span>';
+  fetchPackModalStats(pack).finally(()=>{$('#packModal').hidden=false});
+}
+async function fetchPackModalStats(pack){
+  try{
+    const cards=await getPackCards(pack);
+    const p=packProgress(pack.id,cards.length);
+    $('#packModalCards').textContent=formatNumber(cards.length);
+    $('#packModalSeen').textContent=formatNumber(p.seen);
+    $('#packModalAccuracy').textContent=p.answered?`${p.accuracy}%`:'—';
+  }catch{
+    $('#packModalCards').textContent='—';
+    $('#packModalSeen').textContent='—';
+    $('#packModalAccuracy').textContent='—';
+  }
+}
+
+function closeModal(id){
+  const modal=$(`#${id}`);
+  if(modal) modal.hidden=true;
+}
+
+async function startSelectedPack(){
+  if(!currentPack) return;
+  let cards=[];
+  try{cards=await getPackCards(currentPack);}catch{toast('We could not open that study pack. Please try again.');return}
+  if(!cards.length){toast('This study pack does not have any usable questions yet.');return}
+  const endless=selectedLength==='endless';
+  const count=endless?0:Math.max(1,Math.min(5000,Number(selectedLength)||20));
+  state.packStarts[activeGrade] += 1;
+  addRecentPack(currentPack,0,0);
+  save();
+  closeModal('packModal');
+
+  if(endless){
+    beginPackSession(currentPack,cards,true,null);
+  }else{
+    const items=buildAdaptivePackSet(activeGrade,cards,count);
+    beginPackSession(currentPack,cards,false,items);
+  }
+}
+
+function beginPackSession(pack,cards,endless,items){
+  const initial=items || [];
+  session={
+    type:'pack',
+    name:pack.name,
+    items:initial,
+    index:0,
+    score:0,
+    xp:0,
+    answered:false,
+    combo:0,
+    maxCombo:0,
+    newCards:0,
+    lastAnswer:null,
+    endless,
+    pack:{...pack,cards},
+    currentItem:null,
+    questionStarted:0
+  };
+  ensureDaySilent(activeGrade);
+  $('#quizName').textContent=endless?`${pack.name} · Endless`:pack.name;
+  $('#quizFinishBtn').textContent='End session';
+  $('#comboBadge').hidden=true;
+  setScreen(quizScreen);
+  renderQuiz();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function nextEndlessCard(){
+  const cards=session.pack?.cards||[];
+  return selectPackCard(activeGrade,cards,session.items.slice(-3).map(x=>x.cardKey));
+}
+
+function renderQuiz(){
+  if(session.endless && session.index >= session.items.length){
+    const next=nextEndlessCard();
+    if(!next){finishSession();return}
+    session.items.push(next);
+  }
+  const current=session.items[session.index];
+  if(!current){finishSession();return}
+
+  const total=session.endless?'∞':session.items.length;
+  $('#quizProgressText').textContent=session.endless?`${session.index+1} · ∞`:`${session.index+1} / ${total}`;
+  $('#quizProgressFill').style.width=session.endless?'42%':`${(session.index/Math.max(1,total))*100}%`;
+  $('#quizXp').textContent=formatNumber(session.xp);
+  $('#comboValue').textContent=session.combo;
+  $('#comboBadge').hidden=session.combo<2;
+  session.answered=false;
+  session.lastAnswer=null;
+  session.currentItem=current;
+  session.questionStarted=Date.now();
+
+  if(current.kind==='amino-structure') renderAminoStructure(current,total);
+  else if(current.kind==='amino-name') renderAminoName(current,total);
+  else if(current.kind==='amino-mixed') (Math.random()<.5 ? renderAminoStructure : renderAminoName)(current,total);
+  else if(current.kind==='vitamin') renderVitamin(current,total);
+  else if(current.kind==='vitamin-mcq') renderVitaminMcq(current,total);
+  else if(current.kind==='custom') renderCustomQuestion(current,total);
+  else if(current.kind==='formula') renderFormulaQuestion(current,total);
+  else renderPack(current,total);
+}
+
+
+function renderCustomQuestion(item,total){
+  const type=item.t||((Array.isArray(item.o))?'m':'s');
+  const typeLabel={s:'SUBJECTIVE',m:'MCQ',ms:'MSQ',n:'NUMERICAL',mx:'MATRIX MATCH',ar:'ASSERTION · REASON'}[type]||'CUSTOM QUIZ';
+  questionArea.innerHTML=`<article class="question-wrap"><div class="question-top"><span class="question-label">${typeLabel}</span><span class="question-count">${total} questions</span></div><div id="customQuestionText" class="pack-prompt rich-content"></div><div id="customAnswerArea"></div></article>`;
+  CCFRenderer.renderRich($('#customQuestionText'),item.q);
+  const area=$('#customAnswerArea');
+  if(type==='m'||type==='ar'){
+    area.innerHTML=`<div class="custom-options">${item.o.map((opt,i)=>`<button class="custom-option" data-custom-option="${i}" type="button"><span>${String.fromCharCode(65+i)}</span><b class="custom-option-text"></b></button>`).join('')}</div><div id="customFeedback"></div>`;
+    [...area.querySelectorAll('.custom-option')].forEach((b,i)=>CCFRenderer.renderRich(b.querySelector('.custom-option-text'),item.o[i]));
+    [...area.querySelectorAll('[data-custom-option]')].forEach(b=>b.onclick=()=>answerCustomMCQ(item,Number(b.dataset.customOption)));
+  }else if(type==='ms'){
+    area.innerHTML=`<div class="custom-type-hint">Select all correct answers.</div><div class="custom-options">${item.o.map((opt,i)=>`<button class="custom-option ms-option" data-custom-option="${i}" type="button"><span>${String.fromCharCode(65+i)}</span><b class="custom-option-text"></b></button>`).join('')}</div><button id="customMsSubmit" class="primary-cta" type="button">Check answer <span class="material-symbols-rounded">arrow_forward</span></button><div id="customFeedback"></div>`;
+    [...area.querySelectorAll('.custom-option')].forEach((b,i)=>CCFRenderer.renderRich(b.querySelector('.custom-option-text'),item.o[i]));
+    [...area.querySelectorAll('[data-custom-option]')].forEach(b=>b.onclick=()=>b.classList.toggle('selected'));
+    $('#customMsSubmit').onclick=()=>answerCustomMSQ(item);
+  }else if(type==='n'){
+    area.innerHTML=`<div class="custom-numerical"><input id="customNumericAnswer" type="number" inputmode="decimal" step="any" placeholder="Enter your answer"><button id="customNumericSubmit" class="primary-cta" type="button">Check answer <span class="material-symbols-rounded">arrow_forward</span></button></div><div id="customFeedback"></div>`;
+    $('#customNumericSubmit').onclick=()=>answerCustomNumerical(item);
+    $('#customNumericAnswer').onkeydown=e=>{if(e.key==='Enter')answerCustomNumerical(item)};
+  }else if(type==='mx'){
+    renderCustomMatrix(area,item);
+  }else{
+    area.innerHTML=`<button id="customReveal" class="primary-cta" type="button"><span class="material-symbols-rounded">visibility</span> Reveal answer</button><div id="customRevealArea"></div>`;
+    $('#customReveal').onclick=()=>{
+      session.answered=true;
+      $('#customReveal').disabled=true;
+      $('#customRevealArea').innerHTML='<div class="reveal-box rich-content" id="customAnswerContent"></div><div class="subtle-note">Recall the answer first, then grade yourself.</div><div class="self-grade"><button id="customKnow" class="grade-answer good" type="button">I remembered it</button><button id="customMiss" class="grade-answer retry" type="button">I need another look</button></div>';
+      CCFRenderer.renderRich($('#customAnswerContent'),item.a);
+      $('#customKnow').onclick=()=>{gradeSessionItem(item,true,getCardStat(activeGrade,item.cardKey).seen);finishOrNext();};
+      $('#customMiss').onclick=()=>{gradeSessionItem(item,false,getCardStat(activeGrade,item.cardKey).seen);finishOrNext();};
+    };
+  }
+}
+
+function customFeedback(item,correct){
+  const feedback=document.querySelector('#customFeedback');if(!feedback)return;const fallback=item.t==='n'?`Correct answer: ${item.v}`:item.t==='mx'?'See the highlighted correct matches above.':(item.a||'Correct answer shown above.');
+  feedback.innerHTML=`<div class="custom-feedback ${correct?'is-correct':'is-wrong'}"><strong>${correct?'Correct':'Not quite'}</strong><div class="feedback-answer-label">Explanation</div><div id="customFeedbackAnswer" class="rich-content"></div><button id="customNext" class="primary-cta" type="button">Continue <span class="material-symbols-rounded">arrow_forward</span></button></div>`;
+  CCFRenderer.renderRich($('#customFeedbackAnswer'),item.e||fallback);$('#customNext').onclick=advanceQuestion;
+}
+
+function answerCustomMCQ(item,index){
+  if(session.answered)return;
+  session.answered=true;
+  const correct=index===item.k;
+  [...document.querySelectorAll('[data-custom-option]')].forEach(b=>b.disabled=true);
+  const chosen=document.querySelector(`[data-custom-option="${index}"]`); const answer=document.querySelector(`[data-custom-option="${item.k}"]`);
+  chosen?.classList.add(correct?'correct':'wrong'); answer?.classList.add('correct');
+  gradeSessionItem(item,correct,getCardStat(activeGrade,item.cardKey).seen);
+  customFeedback(item,correct);
+}
+
+function answerCustomMSQ(item){
+  if(session.answered)return;
+  const selected=[...document.querySelectorAll('[data-custom-option].selected')].map(b=>Number(b.dataset.customOption)).sort((a,b)=>a-b);
+  const correctKeys=[...item.k].sort((a,b)=>a-b);
+  const correct=selected.length===correctKeys.length && selected.every((v,i)=>v===correctKeys[i]);
+  session.answered=true;
+  [...document.querySelectorAll('[data-custom-option]')].forEach(b=>{b.disabled=true;const i=Number(b.dataset.customOption);if(item.k.includes(i))b.classList.add('correct');else if(b.classList.contains('selected'))b.classList.add('wrong');});
+  gradeSessionItem(item,correct,getCardStat(activeGrade,item.cardKey).seen);
+  customFeedback(item,correct);
+}
+
+function answerCustomNumerical(item){
+  if(session.answered)return;
+  const raw=$('#customNumericAnswer')?.value.trim();
+  if(!raw){toast('Enter a numerical answer first.');return;}
+  const value=Number(raw);
+  if(!Number.isFinite(value)){toast('Enter a valid number.');return;}
+  const tolerance=item.tol!==undefined?Number(item.tol):(Number.isInteger(item.v)?0:Math.max(1e-9,Math.abs(item.v)*1e-6));
+  const correct=Math.abs(value-item.v)<=tolerance;
+  session.answered=true;
+  $('#customNumericAnswer').disabled=true; $('#customNumericSubmit').disabled=true;
+  gradeSessionItem(item,correct,getCardStat(activeGrade,item.cardKey).seen);
+  customFeedback({...item,a:item.a||`Correct answer: ${item.v}`},correct);
+}
+
+function matrixRoman(i){return ['i','ii','iii','iv','v','vi','vii','viii','ix','x'][i]||String(i+1)}
+function matrixLetter(i){return String.fromCharCode(65+i)}
+function renderCustomMatrix(area,item){
+  const rows=item.r.map((row,ri)=>`<div class="matrix-row"><div class="matrix-list-i"><span class="matrix-row-letter">${matrixLetter(ri)}</span><div class="matrix-rich" data-matrix-rich="r${ri}"></div></div><div class="matrix-list-ii"><div class="matrix-choice-grid">${item.c.map((col,ci)=>`<button class="matrix-choice" data-matrix-row="${ri}" data-matrix-col="${ci}" type="button"><span class="matrix-choice-code">${matrixRoman(ci)}</span><span class="matrix-rich" data-matrix-rich="c${ci}"></span></button>`).join('')}</div></div></div>`).join('');
+  area.innerHTML=`<div class="custom-type-hint">Match each List I item with every correct List II option.</div><div class="matrix-match matrix-two-list"><div class="matrix-head"><span>LIST I</span><span>LIST II</span></div>${rows}</div><button id="customMatrixSubmit" class="primary-cta" type="button">Check matrix <span class="material-symbols-rounded">arrow_forward</span></button><div id="customFeedback"></div>`;
+  item.r.forEach((row,ri)=>CCFRenderer.renderRich(area.querySelector(`[data-matrix-rich="r${ri}"]`),row));item.c.forEach((col,ci)=>area.querySelectorAll(`[data-matrix-rich="c${ci}"]`).forEach(el=>CCFRenderer.renderRich(el,col)));
+  area.querySelectorAll('[data-matrix-row]').forEach(b=>b.onclick=()=>b.classList.toggle('selected'));$('#customMatrixSubmit').onclick=()=>answerCustomMatrix(item);
+}
+
+function answerCustomMatrix(item){
+  if(session.answered)return;
+  const selected=item.r.map((_,ri)=>[...document.querySelectorAll(`[data-matrix-row="${ri}"].selected`)].map(b=>Number(b.dataset.matrixCol)).sort((a,b)=>a-b));
+  const expected=item.k.map(row=>[...row].sort((a,b)=>a-b));
+  const correct=selected.length===expected.length && selected.every((row,i)=>row.length===expected[i].length&&row.every((v,j)=>v===expected[i][j]));
+  session.answered=true;
+  $$('[data-matrix-row]').forEach(b=>{b.disabled=true;const ri=Number(b.dataset.matrixRow),ci=Number(b.dataset.matrixCol);if(item.k[ri]?.includes(ci))b.classList.add('correct');else if(b.classList.contains('selected'))b.classList.add('wrong');});
+  gradeSessionItem(item,correct,getCardStat(activeGrade,item.cardKey).seen);
+  customFeedback(item,correct);
+}
+
+function renderPack(item,total){
+  questionArea.innerHTML=`
+    <article class="question-wrap">
+      <div class="question-top">
+        <span class="question-label">${escapeHtml(item.group||'STUDY PACK')}</span>
+        <span class="question-count">${total==='∞'?'ENDLESS':`${total} questions`}</span>
+      </div>
+      <div id="packPrompt" class="pack-prompt rich-content"></div>
+      <button id="revealPack" class="primary-cta" type="button"><span class="material-symbols-rounded">visibility</span> Reveal answer</button>
+      <div id="packAnswer"></div>
+    </article>`;
+  CCFRenderer.renderRich($('#packPrompt'),item.question);
+  $('#revealPack').onclick=()=>{
+    session.answered=true;
+    const stat=getCardStat(activeGrade,item.cardKey);
+    const seenBefore=stat.seen;
+    $('#packAnswer').innerHTML=`
+      <div id="packAnswerContent" class="reveal-box rich-content"></div>
+      <div class="subtle-note">Recall the answer before revealing it, then choose how well you remembered it.</div>
+      <div class="self-grade">
+        <button id="packKnow" class="grade-answer good" type="button">I remembered it</button>
+        <button id="packMiss" class="grade-answer retry" type="button">I need another look</button>
+      </div>`;
+    CCFRenderer.renderRich($('#packAnswerContent'),item.answer);
+    $('#revealPack').disabled=true;
+    $('#packKnow').onclick=()=>finishPackAnswer(true,item,seenBefore);
+    $('#packMiss').onclick=()=>finishPackAnswer(false,item,seenBefore);
+  };
+}
+
+function finishPackAnswer(correct,item,seenBefore){
+  $('#packKnow').disabled=true;
+  $('#packMiss').disabled=true;
+  gradeSessionItem(item,correct,seenBefore);
+  finishOrNext();
+}
+
+function renderAminoStructure(item,total){
+  const [name,three,code]=item.a;
+  questionArea.innerHTML=`
+    <article class="question-wrap">
+      <div class="question-top"><span class="question-label">AMINO ACIDS · STRUCTURE → NAME</span><span class="question-count">${total} questions</span></div>
+      <h2>Which amino acid is this?</h2>
+      <div class="image-question"><img src="aminoAcids/${escapeAttr(code)}.png" alt="Amino acid structure"></div>
+      <div class="amino-input"><input id="aminoAnswer" autocomplete="off" placeholder="Enter the full name, 3-letter code, or 1-letter code"><button id="aminoCheck" class="next-btn" type="button">Check answer</button></div>
+      <div id="feedback"></div>
+      <div class="question-footer"><span class="question-tip">Full names allow one typo. Codes must match exactly.</span><button id="nextQuestion" class="next-btn" type="button" disabled>Continue <span class="material-symbols-rounded">arrow_forward</span></button></div>
+    </article>`;
+  const input=$('#aminoAnswer');
+  input.focus();
+  $('#aminoCheck').onclick=()=>answerAminoStructure(item);
+  input.addEventListener('keydown',e=>{if(e.key==='Enter') answerAminoStructure(item);});
+}
+function normalize(value){return String(value).toLowerCase().trim().replace(/[^a-z0-9]/g,'')}
+function dist1(a,b){
+  if(a===b)return true;
+  if(Math.abs(a.length-b.length)>1)return false;
+  if(a.length===b.length)return [...a].filter((c,i)=>c!==b[i]).length<=1;
+  if(a.length>b.length)[a,b]=[b,a];
+  let i=0,j=0,d=0;
+  while(i<a.length&&j<b.length){
+    if(a[i]===b[j]){i++;j++;}
+    else{d++;j++;if(d>1)return false;}
+  }
+  return true;
+}
+function answerAminoStructure(item){
+  if(session.answered)return;
+  const [name,three,code]=item.a;
+  const value=normalize($('#aminoAnswer').value);
+  if(!value)return;
+  session.answered=true;
+  const correct=dist1(value,normalize(name))||value===normalize(three)||value===normalize(code);
+  gradeSessionItem({...item,cardKey:`special:amino:${code}`},correct,getCardStat(activeGrade,`special:amino:${code}`).seen);
+  feedback(correct,correct?`Correct — ${name} (${three}).`:`Correct answer: ${name} (${three}, ${code})`,correct?'':'Worth another look.');
+  finishOrNext();
+}
+
+function renderAminoName(item,total){
+  const [name,three]=item.a;
+  const choices=shuffle(AMINO_ACIDS).map(a=>a[2]);
+  questionArea.innerHTML=`
+    <article class="question-wrap">
+      <div class="question-top"><span class="question-label">AMINO ACIDS · NAME → STRUCTURE</span><span class="question-count">${total} questions</span></div>
+      <h2>${escapeHtml(name)} <span style="color:var(--muted);font-size:.55em">(${escapeHtml(three)})</span></h2>
+      <div class="structure-options">${choices.map(code=>`<button class="structure-option" data-code="${escapeAttr(code)}" type="button"><img src="aminoAcids/${escapeAttr(code)}.png" alt="Structure choice"></button>`).join('')}</div>
+      <div id="feedback"></div>
+      <div class="question-footer"><span class="question-tip">Choose the structure that matches the name.</span><button id="nextQuestion" class="next-btn" type="button" disabled>Continue <span class="material-symbols-rounded">arrow_forward</span></button></div>
+    </article>`;
+  $$('[data-code]').forEach(button=>button.onclick=()=>answerAminoName(item,button.dataset.code));
+}
+function answerAminoName(item,code){
+  if(session.answered)return;
+  session.answered=true;
+  const answerCode=item.a[2];
+  const key=`special:amino:${answerCode}`;
+  const correct=code===answerCode;
+  gradeSessionItem({...item,cardKey:key},correct,getCardStat(activeGrade,key).seen);
+  $$('[data-code]').forEach(button=>{
+    button.disabled=true;
+    if(button.dataset.code===answerCode)button.classList.add('correct');
+    if(button.dataset.code===code&&!correct)button.classList.add('wrong');
+  });
+  feedback(correct,correct?'Correct — that structure matches.':`Correct structure: ${item.a[0]} (${item.a[1]}).`,correct?'':'Worth another look.');
+  finishOrNext();
+}
+
+function renderVitamin(item,total){
+  const v=item.v;
+  const type=['name','sources','deficiency'][Math.floor(Math.random()*3)];
+  const prompt=type==='name'?`What is ${v.vitamin} also known as?`:type==='sources'?`Name a useful source of ${v.vitamin}.`:`What is a classic deficiency associated with ${v.vitamin}?`;
+  const answer=type==='name'?(v.name||'Not specified'):type==='sources'?v.sources:v.deficiency;
+  item.promptKey=type;
+  item.currentAnswer=answer;
+  const key=`special:vitamin:${v.vitamin}:${type}`;
+  questionArea.innerHTML=`
+    <article class="question-wrap">
+      <div class="question-top"><span class="question-label">VITAMINS · LEARNER</span><span class="question-count">${total} questions</span></div>
+      <h2>${escapeHtml(prompt)}</h2>
+      <button id="revealVitamin" class="primary-cta" type="button"><span class="material-symbols-rounded">visibility</span> Reveal answer</button>
+      <div id="vitAnswer"></div>
+    </article>`;
+  $('#revealVitamin').onclick=()=>{
+    session.answered=true;
+    $('#vitAnswer').innerHTML=`
+      <div class="reveal-box">${escapeHtml(answer)}</div>
+      <div class="subtle-note">Reveal the answer, then choose how well you remembered it.</div>
+      <div class="self-grade"><button id="vitKnow" class="grade-answer good" type="button">I remembered it</button><button id="vitMiss" class="grade-answer retry" type="button">I need another look</button></div>`;
+    $('#revealVitamin').disabled=true;
+    $('#vitKnow').onclick=()=>finishSpecialAnswer(true,{...item,cardKey:key});
+    $('#vitMiss').onclick=()=>finishSpecialAnswer(false,{...item,cardKey:key});
+  };
+}
+function finishSpecialAnswer(correct,item){
+  $('#vitKnow')?.setAttribute('disabled','disabled');
+  $('#vitMiss')?.setAttribute('disabled','disabled');
+  gradeSessionItem(item,correct,getCardStat(activeGrade,item.cardKey).seen);
+  finishOrNext();
+}
+
+function renderVitaminMcq(item,total){
+  const v=item.v;
+  const prompts=[
+    [`What is ${v.vitamin} also known as?`,v.name],
+    [`Which deficiency is associated with ${v.vitamin}?`,v.deficiency],
+    [`Which option is a source of ${v.vitamin}?`,v.sources]
+  ];
+  let [prompt,answer]=prompts[Math.floor(Math.random()*prompts.length)];
+  if(!answer) [prompt,answer]=prompts.find(x=>x[1])||prompts[0];
+  let distractors;
+  if(prompt.includes('also known')) distractors=VITAMINS.filter(x=>x!==v&&x.name).map(x=>x.name);
+  else if(prompt.includes('deficiency')) distractors=VITAMINS.filter(x=>x!==v).map(x=>x.deficiency);
+  else distractors=VITAMINS.filter(x=>x!==v).map(x=>x.sources);
+  const options=shuffle([answer,...shuffle(distractors).slice(0,3)]);
+  const key=`special:vitamin:${v.vitamin}:mcq`;
+  questionArea.innerHTML=`
+    <article class="question-wrap">
+      <div class="question-top"><span class="question-label">VITAMINS · MCQ</span><span class="question-count">${total} questions</span></div>
+      <h2>${escapeHtml(prompt)}</h2>
+      <div class="option-list">${options.map((option,i)=>`<button class="option-btn" data-vit-opt="${i}" type="button"><span class="option-letter">${String.fromCharCode(65+i)}</span><span class="option-text">${escapeHtml(option)}</span></button>`).join('')}</div>
+      <div id="feedback"></div>
+      <div class="question-footer"><span class="question-tip">Choose an answer and get instant feedback.</span><button id="nextQuestion" class="next-btn" type="button" disabled>Continue <span class="material-symbols-rounded">arrow_forward</span></button></div>
+    </article>`;
+  $$('[data-vit-opt]').forEach((button,i)=>button.onclick=()=>{
+    if(session.answered)return;
+    session.answered=true;
+    const correct=options[i]===answer;
+    gradeSessionItem({...item,cardKey:key},correct,getCardStat(activeGrade,key).seen);
+    $$('[data-vit-opt]').forEach((node,j)=>{
+      node.disabled=true;
+      if(options[j]===answer)node.classList.add('correct');
+      if(j===i&&!correct)node.classList.add('wrong');
+    });
+    feedback(correct,correct?'Correct — you remembered it.':`Correct answer: ${answer}`,correct?'':'Worth another look.');
+    finishOrNext();
+  });
+}
+
+function feedback(correct,text,sub=''){
+  const el=$('#feedback');
+  if(!el)return;
+  el.innerHTML=`<div class="feedback ${correct?'':'wrong'}">${escapeHtml(text)}${sub?`<small>${escapeHtml(sub)}</small>`:''}</div>`;
+}
+
+function gradeSessionItem(item,correct,seenBefore){
+  const grade=activeGrade;
+  session.lastAnswer=correct;
+  session.score += correct?1:0;
+
+  if(correct) session.combo += 1;
+  else session.combo = 0;
+  session.maxCombo = Math.max(session.maxCombo,session.combo);
+  state.bestCombo[grade] = Math.max(state.bestCombo[grade],session.maxCombo);
+
+  const firstExposure = touchCard(grade,item.cardKey,correct);
+
+  let gain = correct ? 12 : 4;
+  if(firstExposure) gain += 5;
+  if(correct && session.combo>=3) gain += Math.min(7,Math.floor(session.combo/3)*2);
+  if(correct && state.streak[grade]>=7) gain += 2;
+  if(session.endless && firstExposure) gain += 2;
+
+  session.xp += gain;
+  addXP(grade,gain);
+  recordActivity(grade);
+
+  if(!correct){
+    // Misses are represented in card stats. No punitive score beyond the lower XP gain.
+  }
+
+  if(session.type==='daily'){
+    const d=state.daily[grade];
+    d.answered += 1;
+    if(correct) d.correct += 1;
+    if(d.answered>=Number(d.target||DAILY_MISSION_BASE)) d.complete=true;
+  }
+
+  if(firstExposure) session.newCards += 1;
+  checkAchievements(grade);
+  save();
+
+  const comboText=correct && session.combo>=2?` · ${session.combo}× combo`:'';
+  const newText=firstExposure?' · New card':'';
+  toast(`+${gain} XP${comboText}${newText}`);
+  $('#quizXp').textContent=formatNumber(session.xp);
+  $('#comboValue').textContent=session.combo;
+  $('#comboBadge').hidden=session.combo<2;
+  $('#streakChipValue').textContent=state.streak[grade];
+}
+
+function finishOrNext(){
+  const next=$('#nextQuestion');
+  if(next){
+    next.disabled=false;
+    next.onclick=advanceQuestion;
+  }else{
+    setTimeout(advanceQuestion,380);
+  }
+}
+
+function advanceQuestion(){
+  if(!session.answered)return;
+  if(session.endless){
+    session.index += 1;
+    renderQuiz();
+    window.scrollTo({top:0,behavior:'smooth'});
+    return;
+  }
+  if(session.index >= session.items.length-1){
+    finishSession();
+    return;
+  }
+  session.index += 1;
+  renderQuiz();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function finishSession(){
+  const grade=activeGrade;
+  const total=session.items.length;
+  const score=session.score;
+  const accuracy=total?Math.round(score/total*100):0;
+  const beforeLevel=levelInfo(getTotalXP()).level;
+  const perfect=total>0 && accuracy===100;
+
+  state.sessions[grade] += 1;
+  if(perfect) state.perfectSessions[grade] += 1;
+  state.bestCombo[grade] = Math.max(state.bestCombo[grade],session.maxCombo);
+
+  let sessionBonus=0;
+  if(perfect) sessionBonus += 30;
+  else if(accuracy>=90) sessionBonus += 15;
+  else if(accuracy>=75) sessionBonus += 8;
+  if(session.endless && total>=25) sessionBonus += 20;
+  if(session.type==='daily' && state.daily[grade].complete && state.daily[grade].answered>=Number(state.daily[grade].target||DAILY_MISSION_BASE)){
+    sessionBonus += Number(state.daily[grade].bonus||DAILY_MISSION_BONUS_BASE);
+  }
+  if(sessionBonus){
+    session.xp += sessionBonus;
+    addXP(grade,sessionBonus);
+  }
+
+  checkAchievements(grade);
+  const afterLevel=levelInfo(getTotalXP()).level;
+  if(afterLevel>beforeLevel){
+    toast(`Level ${afterLevel} unlocked · ${levelTitle(afterLevel)}`);
+    celebrate();
+  }
+
+  state.lastSession[grade]={
+    name:session.name,
+    packId:session.pack?.id||null,
+    score,
+    total,
+    accuracy,
+    xp:session.xp,
+    newCards:session.newCards,
+    date:today(),
+    endless:session.endless
+  };
+  addRecentPack(session.pack,score,total);
+  save();
+
+  $('#completeEyebrow').textContent=`${session.name.toUpperCase()} · ${session.endless?'ENDED':'COMPLETE'}`;
+  $('#completeTitle').textContent=
+    accuracy===100?'Clean sweep.':
+    accuracy>=90?'Excellent work.':
+    accuracy>=75?'Solid session.':
+    'Good practice — keep building.';
+  $('#completeMessage').textContent=
+    session.endless
+      ? `You worked through ${total} cards in Endless mode. The next run will continue surfacing less familiar questions.`
+      : `You finished ${total} cards. Your next session will favour unseen and weaker questions.`;
+  $('#completeScore').textContent=formatNumber(total);
+  $('#completeAccuracy').textContent=`${accuracy}%`;
+  $('#completeNew').textContent=formatNumber(session.newCards);
+  $('#completeXp').textContent=`+${formatNumber(session.xp)} XP`;
+
+  const bonusText=sessionBonus?` · +${sessionBonus} bonus XP`:'';
+  $('#completionNote').textContent=
+    perfect ? `Perfect session. ${sessionBonus?`You also earned a ${sessionBonus} XP bonus.`:'That was flawless.'}`
+    : session.newCards>0 ? `${session.newCards} new cards are now in your memory history.${bonusText}`
+    : `You are strengthening cards you have already seen.${bonusText}`;
+
+  if(perfect || session.maxCombo>=5) celebrate();
+  setScreen(completeScreen);
+  updateTopbar();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function beginSpecialSession(name,items,kind){
+  session={
+    type:'special',
+    name,
+    items:items,
+    index:0,
+    score:0,
+    xp:0,
+    answered:false,
+    combo:0,
+    maxCombo:0,
+    newCards:0,
+    lastAnswer:null,
+    endless:false,
+    pack:null,
+    currentItem:null,
+    questionStarted:0,
+    specialKind:kind
+  };
+  setScreen(quizScreen);
+  $('#quizName').textContent=name;
+  $('#quizFinishBtn').textContent='End session';
+  renderQuiz();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function startSpecial(kind){
+  if(kind==='amino-structure'){
+    beginSpecialSession('Structure → Name',shuffle(AMINO_ACIDS).map(a=>({id:`amino-${a[2]}`,a,kind:'amino-structure'})),'amino-structure');
+  }else if(kind==='amino-name'){
+    beginSpecialSession('Name → Structure',shuffle(AMINO_ACIDS).map(a=>({id:`amino-${a[2]}`,a,kind:'amino-name'})),'amino-name');
+  }else if(kind==='amino-mixed'){
+    beginSpecialSession('Mixed amino practice',shuffle(AMINO_ACIDS).map(a=>({id:`amino-${a[2]}`,a,kind:'amino-mixed'})),'amino-mixed');
+  }else if(kind==='vitamin'){
+    beginSpecialSession('Vitamins Learner',shuffle(VITAMINS).map((v,i)=>({id:`vit-${i}`,v,kind:'vitamin'})),'vitamin');
+  }else if(kind==='vitamin-mcq'){
+    beginSpecialSession('Vitamins MCQ',shuffle(VITAMINS).map((v,i)=>({id:`vit-${i}`,v,kind:'vitamin-mcq'})),'vitamin-mcq');
+  }
+}
+
+async function startDaily(){
+  if(state.daily[activeGrade]?.complete){toast('Today’s mission is complete. Come back tomorrow for a fresh challenge.');return;}
+  const all=formulaAllItems().filter(x=>x.grade===activeGrade||x.grade==='XI-XII');
+  if(!all.length){toast('No formulas are available for this class.');return;}
+  const target=Number(state.daily[activeGrade]?.target||DAILY_MISSION_BASE);
+  const items=shuffle(all).slice(0,Math.min(target,all.length)).map(x=>({...x,id:`daily-formula:${x.id}`,cardKey:`formula:${x.id}`,kind:'formula'}));
+  session={type:'daily',name:`Daily Formula Mission · Class ${activeGrade}`,items,index:0,score:0,xp:0,answered:false,combo:0,maxCombo:0,newCards:0,lastAnswer:null,endless:false,pack:{id:'daily-formulas',name:'Daily Formula Mission',description:'Adaptive Physics formula recall',cards:items},currentItem:null,questionStarted:0,specialKind:'formula'};
+  setScreen(quizScreen);$('#quizName').textContent='Daily Formula Mission';$('#quizFinishBtn').textContent='End session';renderQuiz();window.scrollTo({top:0,behavior:'smooth'});
+}
+function renderDaily(){
+  ensureDaySilent(activeGrade);
+  const daily=state.daily[activeGrade];
+  const target=Number(daily.target||DAILY_MISSION_BASE);
+  const bonus=Number(daily.bonus||DAILY_MISSION_BONUS_BASE);
+  $('#dailyCount').textContent=`${Math.min(daily.answered,target)} / ${target}`;
+  $('#dailyFill').style.width=`${Math.min(100,daily.answered/target*100)}%`;
+  const done=daily.complete;
+  $('#dailyBonus').textContent=`+${formatNumber(bonus)} XP`;
+  $('#dailyTitle').textContent=done?'Mission complete · well done.':`${target} questions · ${formatNumber(bonus)} bonus XP`;
+  $('#dailyDescription').textContent=done?'Come back tomorrow for a fresh challenge.':'Your mission grows with your streak, up to 40 questions and 125 bonus XP.';
+  $('#dailyButtonText').textContent=done?'Complete for today':'Start today’s mission';
+  $('#dailyBtn').disabled=done || !formulaReady || !formulaAllItems().some(x=>x.grade===activeGrade||x.grade==='XI-XII');
+}
+
+function addRecentPack(pack,score,total){
+  if(!pack || !pack.id || pack.id==='daily') return;
+  const list=state.recent[activeGrade];
+  list.unshift({
+    packId:pack.id,
+    name:pack.name,
+    score:score||0,
+    total:total||0,
+    date:today()
+  });
+  state.recent[activeGrade]=list.filter((item,index,arr)=>arr.findIndex(x=>x.packId===item.packId)===index).slice(0,5);
+}
+
+function renderRecent(){
+  const list=$('#recentList');
+  const recent=state.recent[activeGrade]||[];
+  if(!recent.length){
+    list.innerHTML='<div class="recent-empty">Your recent study sessions will appear here.</div>';
+    return;
+  }
+  list.innerHTML=recent.map(item=>`
+    <div class="recent-item">
+      <div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.date)}</small></div>
+      <span class="recent-score">${formatNumber(item.score)} / ${formatNumber(item.total)}</span>
+    </div>`).join('');
+}
+
+function achievementEarnedTotal(grade){
+  const local=Object.entries(state.achievementLevels?.[grade]||{}).filter(([key])=>key!=='xp').reduce((sum,[,n])=>sum+Number(n||0),0);
+  return local + Number(state.globalAchievementLevels?.xp||0);
+}
+
+function achievementProgressCopy(def){
+  if(def.level===0){
+    return `First milestone: ${formatNumber(def.next)} ${def.unit}.`;
+  }
+  const remaining=Math.max(0,def.next-def.value);
+  return `Level ${def.level} · ${formatNumber(def.value)} ${def.unit} · ${formatNumber(remaining)} to Level ${def.level+1}.`;
+}
+
+function renderAchievementsPreview(grade=activeGrade){
+  const defs=achievementDefs(grade);
+  const earnedCount=achievementEarnedTotal(grade);
+  $('#achievementCountTop').textContent=formatNumber(earnedCount);
+  $('#badgeCount').textContent=formatNumber(earnedCount);
+  const preview=defs
+    .slice()
+    .sort((a,b)=>b.level-a.level || b.pct-a.pct)
+    .slice(0,5);
+  $('#badgeList').innerHTML=preview.map(def=>`
+    <div class="shelf-item ${def.level?'earned':''}">
+      <span class="shelf-item-icon"><span class="material-symbols-rounded">${escapeHtml(def.icon)}</span></span>
+      <span><strong>${escapeHtml(def.title)}</strong><small>${escapeHtml(achievementProgressCopy(def))}</small></span>
+      <span class="shelf-state">${def.level?'Level '+def.level:'Next'}</span>
+    </div>`).join('');
+}
+
+function renderAchievementsModal(){
+  const defs=achievementDefs(activeGrade);
+  const filtered=defs.filter(def=>{
+    if(achievementFilter==='earned') return def.level>0;
+    if(achievementFilter==='locked') return def.level===0;
+    return true;
+  });
+  $('#achievementEarnedCount').textContent=formatNumber(achievementEarnedTotal(activeGrade));
+  $('#achievementList').innerHTML=filtered.map(def=>`
+    <article class="achievement-item ${def.level?'earned':''}">
+      <div class="achievement-icon-wrap">
+        <span class="achievement-icon"><span class="material-symbols-rounded">${escapeHtml(def.icon)}</span></span>
+        <b>${def.level?'Level '+def.level:'Not yet'}</b>
+      </div>
+      <span class="achievement-copy">
+        <strong>${escapeHtml(def.title)}</strong>
+        <small>${escapeHtml(def.description)} ${escapeHtml(achievementProgressCopy(def))}</small>
+        <span class="achievement-mini-track"><i style="width:${def.pct}%"></i></span>
+      </span>
+      <span class="achievement-state">${def.level?`Level ${def.level}`:'In progress'}</span>
+    </article>`).join('');
+}
+
+function openAchievements(){
+  achievementFilter='all';
+  $$('.filter-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.achFilter==='all'));
+  renderAchievementsModal();
+  $('#achievementModal').hidden=false;
+}
+
+function renderStats(){
+  const g=activeGrade;
+  ensureDaySilent(g);
+  const info=levelInfo(getTotalXP());
+  const set=(id,v)=>{const el=$(`#${id}`);if(el)el.textContent=v};
+  set('heroLevel',info.level);set('heroLevelLabel',levelTitle(info.level));set('heroLevelRank',levelTitle(info.level).toUpperCase());
+  const fill=$('#heroLevelFill');if(fill)fill.style.width=`${info.pct}%`;
+  set('heroLevelInto',`${formatNumber(info.into)} XP`);set('heroLevelRemaining',info.isMax?'MAX LEVEL REACHED':`${formatNumber(info.needed)} XP to reach Level ${info.level+1}`);
+  renderHomeMemory();
+}
+
+function renderDashboard(){
+  updateTopbar();
+  const eyebrow=$('#dashboardEyebrow');if(eyebrow)eyebrow.textContent=`CLASS ${activeGrade} · PHYSICS`;
+  renderStats();
+}
+
+function changeLength(value){
+  selectedLength=value;
+  $$('.length-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.length===String(value)));
+  const label=value==='endless'?'Start Endless mode':`Start ${formatNumber(Number(value))} questions`;
+  $('#startPackBtn').innerHTML=`<span class="material-symbols-rounded">${value==='endless'?'all_inclusive':'play_arrow'}</span><span>${label}</span>`;
+}
+
+function handleCustomLengthInput(){
+  const value=Math.max(1,Math.min(5000,Number($('#customLength').value)||1));
+  selectedLength=value;
+  $$('.length-btn').forEach(btn=>btn.classList.remove('active'));
+  $('#startPackBtn').innerHTML=`<span class="material-symbols-rounded">play_arrow</span><span>Start ${formatNumber(value)} questions</span>`;
+}
+
+$$('.grade-row').forEach(button=>button.onclick=()=>enterGrade(button.dataset.grade));
+$('#brandBtn').onclick=()=>activeGrade?renderDashboard():home();
+$('#classChip').onclick=()=>activeGrade?renderDashboard():home();
+$('#heroStudyBtn').onclick=openFormulaSession;
+$('#heroViewBtn').onclick=openFormulaLibrary;
+$('#homeViewBtn').onclick=openFormulaLibrary;
+$('#startRevisionBtn').onclick=openFormulaSession;
+$('#libraryBackBtn').onclick=()=>{setScreen(dashboardScreen);renderDashboard();window.scrollTo({top:0,behavior:'smooth'});};
+$('#formulaSearch')?.addEventListener('input',renderFormulaLibrary);
+$('#formulaGradeFilter')?.addEventListener('change',()=>{populateFormulaChapterFilter();renderFormulaLibrary();});
+$('#formulaChapterFilter')?.addEventListener('change',renderFormulaLibrary);
+$('#formulaSelectAll')?.addEventListener('click',()=>{const inputs=$$('#formulaChapterChoices input');const allChecked=inputs.length>0&&inputs.every(x=>x.checked);inputs.forEach(x=>x.checked=!allChecked);$('#formulaSelectAll').textContent=allChecked?'Select all':'Clear all';});
+$$('[data-formula-length]').forEach(btn=>btn.onclick=()=>{formulaSessionLength=Number(btn.dataset.formulaLength);$$('[data-formula-length]').forEach(x=>x.classList.toggle('active',x===btn));});
+$('#confirmFormulaSession').onclick=startConfiguredFormulaSession;
+
+$$('[data-special]').forEach(button=>button.onclick=()=>startSpecial(button.dataset.special));
+$$('[data-close-modal]').forEach(button=>button.onclick=()=>closeModal(button.dataset.closeModal));
+$$('[data-length]').forEach(button=>button.onclick=()=>changeLength(button.dataset.length));
+$('#customLength').addEventListener('input',handleCustomLengthInput);
+$('#startPackBtn').onclick=startSelectedPack;
+
+$$('[data-ach-filter]').forEach(button=>{
+  button.onclick=()=>{
+    achievementFilter=button.dataset.achFilter;
+    $$('.filter-btn').forEach(btn=>btn.classList.toggle('active',btn===button));
+    renderAchievementsModal();
+  };
+});
+
+$('#quizBackBtn').onclick=()=>{
+  setScreen(dashboardScreen);
+  renderDashboard();
+  window.scrollTo({top:0,behavior:'smooth'});
+};
+$('#quizFinishBtn').onclick=()=>{
+  if(!session.answered && session.index===0){
+    const confirmed=window.confirm('Leave this session? Nothing will be recorded.');
+    if(confirmed){
+      setScreen(dashboardScreen);
+      renderDashboard();
+    }
+    return;
+  }
+  finishSession();
+};
+$('#completeAgainBtn').onclick=()=>{
+  if(session.type==='custom' && session.pack?.id) playCustomQuiz(session.pack.id);
+  else if(session.pack?.id && session.pack.id!=='daily') openPackLauncher(session.pack.id);
+  else if(session.type==='special') startSpecial(session.specialKind || 'amino-mixed');
+  else if(session.type==='formula') startFormulaRecall();
+  else if(session.type==='daily') startDaily();
+  else setScreen(dashboardScreen);
+};
+$('#completeHomeBtn').onclick=()=>{
+  setScreen(dashboardScreen);
+  renderDashboard();
+  window.scrollTo({top:0,behavior:'smooth'});
+};
+$('#completeAchievementsBtn').onclick=openAchievements;
+
+window.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){
+    if(!$('#packModal').hidden)closeModal('packModal');
+    if(!$('#achievementModal').hidden)closeModal('achievementModal');
+    if($('#customQuizModal') && !$('#customQuizModal').hidden)closeModal('customQuizModal');
+  }
+});
+
+function ensureInitial(){
+  migrateAchievementLevels('XI');
+  migrateAchievementLevels('XII');
+  save();
+  renderGradePicker();
+  updateTopbar();
+  loadFormulaCatalog();
+  if(activeGrade){
+    ensureDaySilent(activeGrade);
+    renderDashboard();
+    setScreen(dashboardScreen);
+  }else{
+    setScreen(gradeScreen);
+  }
+}
+
+ensureInitial();
+
+
+// Branded launch screen: keep the first paint intentional, then hand off to the app.
+(function initSplash(){
+  const splash=$('#splashScreen');
+  if(!splash) return;
+  const hide=()=>{
+    splash.classList.add('is-leaving');
+    window.setTimeout(()=>splash.remove(),1840);
+  };
+  if(document.readyState==='complete') window.setTimeout(hide,850);
+  else window.addEventListener('load',()=>window.setTimeout(hide,650),{once:true});
+})();
